@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOGOS-THEOS · Escuela de Investigación Teológica</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+
+<div class="barra-sesion" id="barra-sesion">
+  <button class="btn-sesion" id="btn-abrir-login">Iniciar sesión</button>
+</div>
+
+<header>
+  <img src="logo-logos-theos.png" alt="Logos-Theos" class="logo-img">
+  <h1 class="sr-solo">Logos-Theos</h1>
+  <p class="tagline">Escuela de Investigación Teológica</p>
+  <div class="marca-cruz" aria-hidden="true"><span></span><span></span><span></span></div>
+</header>
+
+<main>
+  <section id="vista-inicio">
+    <p class="intro">Cada tema reúne las clases que se van publicando. Entra a un tema para verlas.</p>
+    <div class="rejilla-temas" id="rejilla-temas"></div>
+  </section>
+
+  <section id="vista-tema">
+    <button class="btn-volver" onclick="volverAInicio()">← Todos los temas</button>
+    <div class="encabezado-tema"><h2 id="titulo-tema"></h2></div>
+    <div id="nota-exclusivo-wrap"></div>
+    <div id="lista-clases"></div>
+  </section>
+</main>
+
+<footer>Escuela de Investigación Teológica LOGOS-THEOS</footer>
+
+<!-- ---------- MODAL DE INICIO DE SESIÓN (para inscritos) ---------- -->
+<div class="overlay-modal" id="overlay-login">
+  <div class="tarjeta-modal">
+    <h3>Iniciar sesión</h3>
+    <p class="sub">Solo para hermanos inscritos en la escuela.</p>
+    <form id="form-login">
+      <div class="campo">
+        <label>Correo</label>
+        <input type="email" id="login-correo" required>
+      </div>
+      <div class="campo">
+        <label>Contraseña</label>
+        <input type="password" id="login-clave" required>
+      </div>
+      <p class="mensaje-error" id="login-error" style="display:none;"></p>
+      <div class="fila-botones">
+        <button type="button" class="btn-secundario" onclick="cerrarModalLogin()">Cancelar</button>
+        <button type="submit" class="btn-accion">Entrar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script type="module">
+import { auth, db } from "./firebase-config.js";
+import { formatearTexto } from "./formato.js";
+import {
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import {
+  collection, getDocs, query, where, orderBy
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+const rejillaTemas = document.getElementById("rejilla-temas");
+const vistaInicio = document.getElementById("vista-inicio");
+const vistaTema = document.getElementById("vista-tema");
+const tituloTema = document.getElementById("titulo-tema");
+const listaClases = document.getElementById("lista-clases");
+const notaExclusivoWrap = document.getElementById("nota-exclusivo-wrap");
+const barraSesion = document.getElementById("barra-sesion");
+
+let usuarioActual = null;
+let temaActualId = null;
+
+/* ---------- SESIÓN ---------- */
+document.getElementById("btn-abrir-login").addEventListener("click", () => {
+  document.getElementById("overlay-login").classList.add("abierto");
+});
+window.cerrarModalLogin = function(){
+  document.getElementById("overlay-login").classList.remove("abierto");
+  document.getElementById("login-error").style.display = "none";
+};
+
+document.getElementById("form-login").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const correo = document.getElementById("login-correo").value;
+  const clave = document.getElementById("login-clave").value;
+  const errorEl = document.getElementById("login-error");
+  errorEl.style.display = "none";
+  try{
+    await signInWithEmailAndPassword(auth, correo, clave);
+    window.cerrarModalLogin();
+  }catch(err){
+    errorEl.textContent = "Correo o contraseña incorrectos.";
+    errorEl.style.display = "block";
+  }
+});
+
+onAuthStateChanged(auth, (usuario) => {
+  usuarioActual = usuario;
+  if(usuario){
+    barraSesion.innerHTML = `
+      <span class="correo-activo">${usuario.email}</span>
+      <button class="btn-sesion" id="btn-salir">Cerrar sesión</button>
+    `;
+    document.getElementById("btn-salir").addEventListener("click", () => signOut(auth));
+  }else{
+    barraSesion.innerHTML = `<button class="btn-sesion" id="btn-abrir-login">Iniciar sesión</button>`;
+    document.getElementById("btn-abrir-login").addEventListener("click", () => {
+      document.getElementById("overlay-login").classList.add("abierto");
+    });
+  }
+  // Si estamos viendo un tema, recargamos sus clases según la sesión actual
+  if(temaActualId) abrirTema(temaActualId);
+});
+
+/* ---------- TEMAS ---------- */
+async function cargarTemas(){
+  const snap = await getDocs(query(collection(db, "temas"), orderBy("orden")));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+async function pintarInicio(){
+  const temas = await cargarTemas();
+  rejillaTemas.innerHTML = temas.map((t, i) => `
+    <div class="tarjeta-tema ${i % 2 === 0 ? "acento-rojo" : "acento-azul"}" tabindex="0"
+         onclick="abrirTema('${t.id}')" onkeydown="if(event.key==='Enter')abrirTema('${t.id}')">
+      <h3>${t.titulo}</h3>
+      <span class="conteo">Ver clases</span>
+    </div>
+  `).join("");
+}
+
+/* ---------- CLASES ---------- */
+async function cargarClases(temaId, autenticado){
+  const clasesRef = collection(db, "temas", temaId, "clases");
+  const resultados = [];
+
+  const snapPublico = await getDocs(query(clasesRef, where("visibilidad", "==", "publico"), orderBy("creado")));
+  snapPublico.forEach(d => resultados.push({ id: d.id, ...d.data() }));
+
+  if(autenticado){
+    const snapExclusivo = await getDocs(query(clasesRef, where("visibilidad", "==", "exclusivo"), orderBy("creado")));
+    snapExclusivo.forEach(d => resultados.push({ id: d.id, ...d.data() }));
+  }
+
+  resultados.sort((a, b) => (a.creado?.seconds || 0) - (b.creado?.seconds || 0));
+  return resultados;
+}
+
+const etiquetas = { lectura: "Solo lectura", libreta: "Para tu libreta", compromiso: "Compromiso" };
+
+window.abrirTema = async function(id){
+  temaActualId = id;
+  const temas = await cargarTemas();
+  const tema = temas.find(t => t.id === id);
+  if(!tema) return;
+
+  tituloTema.textContent = tema.titulo;
+
+  const autenticado = !!usuarioActual;
+  notaExclusivoWrap.innerHTML = autenticado ? "" : `
+    <p class="nota-exclusivo">Hay contenido exclusivo para inscritos en este tema.
+    <button onclick="document.getElementById('overlay-login').classList.add('abierto')">Inicia sesión</button> para verlo.</p>
+  `;
+
+  const clases = await cargarClases(id, autenticado);
+  listaClases.innerHTML = clases.map((c, i) => `
+    <div class="clase" id="clase-${i}">
+      <button class="clase-cabecera" onclick="toggleClase(${i})">
+        <span class="punto-tipo ${c.tipo}"></span>
+        <span class="info-clase">
+          <h3>${c.titulo}${c.visibilidad === "exclusivo" ? '<span class="etiqueta-exclusivo">Exclusivo</span>' : ""}</h3>
+          <span class="etiqueta-tipo ${c.tipo}">${etiquetas[c.tipo] || c.tipo}</span>
+        </span>
+        <span class="flecha">›</span>
+      </button>
+      <div class="clase-contenido">${formatearTexto(c.texto)}</div>
+    </div>
+  `).join("") || `<p style="color:var(--tinta-suave);">Todavía no hay clases publicadas en este tema.</p>`;
+
+  vistaInicio.style.display = "none";
+  vistaTema.style.display = "block";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+window.volverAInicio = function(){
+  temaActualId = null;
+  vistaTema.style.display = "none";
+  vistaInicio.style.display = "block";
+};
+
+window.toggleClase = function(i){
+  document.getElementById("clase-" + i).classList.toggle("abierta");
+};
+
+pintarInicio();
+</script>
+
+</body>
+</html>

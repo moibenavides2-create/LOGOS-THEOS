@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel del pastor · LOGOS-THEOS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+
+<header>
+  <img src="logo-logos-theos.png" alt="Logos-Theos" class="logo-img">
+  <p class="tagline">Panel de publicación del pastor</p>
+</header>
+
+<!-- ---------- BLOQUEADO: sin sesión o sin permiso ---------- -->
+<div class="panel-bloqueado" id="panel-bloqueado" style="display:none;">
+  <h2 id="mensaje-bloqueo">Inicia sesión para continuar</h2>
+  <p id="submensaje-bloqueo">Este panel es solo para la cuenta del pastor.</p>
+  <div class="campo" style="margin-top:20px; text-align:left;">
+    <label>Correo</label>
+    <input type="email" id="login-correo">
+  </div>
+  <div class="campo" style="text-align:left;">
+    <label>Contraseña</label>
+    <input type="password" id="login-clave">
+  </div>
+  <p class="mensaje-error" id="login-error" style="display:none;"></p>
+  <button class="btn-accion" id="btn-entrar" style="width:100%;">Entrar</button>
+</div>
+
+<!-- ---------- PANEL (visible solo si es pastor) ---------- -->
+<main id="panel-principal" style="display:none;">
+  <div class="barra-sesion" style="justify-content:space-between; padding-top:0;">
+    <span class="correo-activo" id="correo-pastor"></span>
+    <button class="btn-sesion" id="btn-salir">Cerrar sesión</button>
+  </div>
+
+  <section class="seccion-panel">
+    <h2>Crear un tema nuevo</h2>
+    <div class="campo">
+      <label>Título del tema</label>
+      <input type="text" id="nuevo-tema-titulo" placeholder="Ej: Fundamentos de la Fe">
+    </div>
+    <button class="btn-accion" id="btn-crear-tema">Crear tema</button>
+    <p class="mensaje-ok" id="tema-ok" style="display:none;">Tema creado.</p>
+  </section>
+
+  <section class="seccion-panel">
+    <h2 id="titulo-form-clase">Publicar una clase</h2>
+    <div class="campo">
+      <label>Tema</label>
+      <select id="select-tema"></select>
+    </div>
+    <div class="campo">
+      <label>Título de la clase</label>
+      <input type="text" id="clase-titulo">
+    </div>
+    <div class="campo">
+      <label>Tipo de material</label>
+      <div class="grupo-radio">
+        <label><input type="radio" name="tipo" value="lectura" checked> Solo lectura</label>
+        <label><input type="radio" name="tipo" value="libreta"> Para la libreta</label>
+        <label><input type="radio" name="tipo" value="compromiso"> Compromiso</label>
+      </div>
+    </div>
+    <div class="campo">
+      <label>¿Quién la puede ver?</label>
+      <div class="grupo-radio">
+        <label><input type="radio" name="visibilidad" value="publico" checked> Todos (público)</label>
+        <label><input type="radio" name="visibilidad" value="exclusivo"> Solo inscritos</label>
+      </div>
+    </div>
+    <div class="campo">
+      <label>Texto de la clase (** para negrita, líneas con "- " para lista, línea en blanco para separar párrafos)</label>
+      <textarea id="clase-texto" placeholder="Escribe aquí el contenido..."></textarea>
+    </div>
+    <div class="campo">
+      <label>Vista previa</label>
+      <div class="vista-previa" id="vista-previa"></div>
+    </div>
+    <div class="fila-botones">
+      <button class="btn-secundario" id="btn-cancelar-edicion" style="display:none;">Cancelar edición</button>
+      <button class="btn-accion" id="btn-guardar-clase">Publicar clase</button>
+    </div>
+    <p class="mensaje-ok" id="clase-ok" style="display:none;"></p>
+  </section>
+
+  <section class="seccion-panel">
+    <h2>Clases publicadas en este tema</h2>
+    <div id="lista-editor"></div>
+  </section>
+</main>
+
+<script type="module">
+import { auth, db } from "./firebase-config.js";
+import { formatearTexto } from "./formato.js";
+import {
+  signInWithEmailAndPassword, signOut, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import {
+  collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs,
+  query, orderBy, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+const panelBloqueado = document.getElementById("panel-bloqueado");
+const panelPrincipal = document.getElementById("panel-principal");
+const selectTema = document.getElementById("select-tema");
+const listaEditor = document.getElementById("lista-editor");
+const vistaPrevia = document.getElementById("vista-previa");
+const claseTexto = document.getElementById("clase-texto");
+
+let claseEnEdicionId = null;
+
+/* ---------- LOGIN ---------- */
+document.getElementById("btn-entrar").addEventListener("click", async () => {
+  const correo = document.getElementById("login-correo").value;
+  const clave = document.getElementById("login-clave").value;
+  const errorEl = document.getElementById("login-error");
+  errorEl.style.display = "none";
+  try{
+    await signInWithEmailAndPassword(auth, correo, clave);
+  }catch(err){
+    errorEl.textContent = "Correo o contraseña incorrectos.";
+    errorEl.style.display = "block";
+  }
+});
+document.getElementById("btn-salir").addEventListener("click", () => signOut(auth));
+
+onAuthStateChanged(auth, async (usuario) => {
+  if(!usuario){
+    panelBloqueado.style.display = "block";
+    panelPrincipal.style.display = "none";
+    document.getElementById("mensaje-bloqueo").textContent = "Inicia sesión para continuar";
+    document.getElementById("submensaje-bloqueo").textContent = "Este panel es solo para la cuenta del pastor.";
+    return;
+  }
+
+  const docUsuario = await getDoc(doc(db, "usuarios", usuario.uid));
+  const esPastor = docUsuario.exists() && docUsuario.data().rol === "pastor";
+
+  if(!esPastor){
+    panelBloqueado.style.display = "block";
+    panelPrincipal.style.display = "none";
+    document.getElementById("mensaje-bloqueo").textContent = "No tienes permiso para entrar aquí";
+    document.getElementById("submensaje-bloqueo").textContent = "Esta cuenta no está marcada como pastor.";
+    return;
+  }
+
+  panelBloqueado.style.display = "none";
+  panelPrincipal.style.display = "block";
+  document.getElementById("correo-pastor").textContent = usuario.email;
+  cargarSelectTemas();
+});
+
+/* ---------- TEMAS ---------- */
+async function cargarSelectTemas(){
+  const snap = await getDocs(query(collection(db, "temas"), orderBy("orden")));
+  selectTema.innerHTML = snap.docs.map(d => `<option value="${d.id}">${d.data().titulo}</option>`).join("");
+  if(snap.docs.length > 0) cargarListaEditor();
+}
+
+document.getElementById("btn-crear-tema").addEventListener("click", async () => {
+  const titulo = document.getElementById("nuevo-tema-titulo").value.trim();
+  if(!titulo) return;
+  const snapExistentes = await getDocs(collection(db, "temas"));
+  await addDoc(collection(db, "temas"), { titulo, orden: snapExistentes.size, creado: serverTimestamp() });
+  document.getElementById("nuevo-tema-titulo").value = "";
+  document.getElementById("tema-ok").style.display = "block";
+  setTimeout(() => document.getElementById("tema-ok").style.display = "none", 2500);
+  cargarSelectTemas();
+});
+
+selectTema.addEventListener("change", cargarListaEditor);
+
+/* ---------- VISTA PREVIA EN VIVO ---------- */
+claseTexto.addEventListener("input", () => {
+  vistaPrevia.innerHTML = formatearTexto(claseTexto.value) || '<span style="color:var(--tinta-suave);">Aquí verás cómo queda tu texto...</span>';
+});
+vistaPrevia.innerHTML = '<span style="color:var(--tinta-suave);">Aquí verás cómo queda tu texto...</span>';
+
+/* ---------- GUARDAR / ACTUALIZAR CLASE ---------- */
+document.getElementById("btn-guardar-clase").addEventListener("click", async () => {
+  const temaId = selectTema.value;
+  if(!temaId) return alert("Primero crea o selecciona un tema.");
+
+  const titulo = document.getElementById("clase-titulo").value.trim();
+  const texto = claseTexto.value.trim();
+  const tipo = document.querySelector('input[name="tipo"]:checked').value;
+  const visibilidad = document.querySelector('input[name="visibilidad"]:checked').value;
+  if(!titulo || !texto) return alert("Falta el título o el texto de la clase.");
+
+  const datos = { titulo, texto, tipo, visibilidad };
+
+  if(claseEnEdicionId){
+    await updateDoc(doc(db, "temas", temaId, "clases", claseEnEdicionId), datos);
+  }else{
+    await addDoc(collection(db, "temas", temaId, "clases"), { ...datos, creado: serverTimestamp() });
+  }
+
+  limpiarFormularioClase();
+  const okEl = document.getElementById("clase-ok");
+  okEl.textContent = "Clase guardada.";
+  okEl.style.display = "block";
+  setTimeout(() => okEl.style.display = "none", 2500);
+  cargarListaEditor();
+});
+
+document.getElementById("btn-cancelar-edicion").addEventListener("click", limpiarFormularioClase);
+
+function limpiarFormularioClase(){
+  claseEnEdicionId = null;
+  document.getElementById("clase-titulo").value = "";
+  claseTexto.value = "";
+  vistaPrevia.innerHTML = '<span style="color:var(--tinta-suave);">Aquí verás cómo queda tu texto...</span>';
+  document.getElementById("titulo-form-clase").textContent = "Publicar una clase";
+  document.getElementById("btn-guardar-clase").textContent = "Publicar clase";
+  document.getElementById("btn-cancelar-edicion").style.display = "none";
+}
+
+/* ---------- LISTA DE CLASES DEL TEMA SELECCIONADO ---------- */
+async function cargarListaEditor(){
+  const temaId = selectTema.value;
+  if(!temaId){ listaEditor.innerHTML = ""; return; }
+
+  const snap = await getDocs(query(collection(db, "temas", temaId, "clases"), orderBy("creado")));
+  if(snap.empty){
+    listaEditor.innerHTML = `<p style="color:var(--tinta-suave);">Todavía no hay clases en este tema.</p>`;
+    return;
+  }
+
+  listaEditor.innerHTML = snap.docs.map(d => {
+    const c = d.data();
+    return `
+      <div class="fila-editor">
+        <div class="info">
+          <strong>${c.titulo}</strong>
+          <span>${c.tipo} · ${c.visibilidad === "exclusivo" ? "Solo inscritos" : "Público"}</span>
+        </div>
+        <div class="acciones">
+          <button onclick="editarClase('${d.id}')">Editar</button>
+          <button class="btn-peligro" onclick="eliminarClase('${d.id}')">Eliminar</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+window.editarClase = async function(claseId){
+  const temaId = selectTema.value;
+  const snap = await getDoc(doc(db, "temas", temaId, "clases", claseId));
+  if(!snap.exists()) return;
+  const c = snap.data();
+
+  claseEnEdicionId = claseId;
+  document.getElementById("clase-titulo").value = c.titulo;
+  claseTexto.value = c.texto;
+  vistaPrevia.innerHTML = formatearTexto(c.texto);
+  document.querySelector(`input[name="tipo"][value="${c.tipo}"]`).checked = true;
+  document.querySelector(`input[name="visibilidad"][value="${c.visibilidad}"]`).checked = true;
+
+  document.getElementById("titulo-form-clase").textContent = "Editando clase";
+  document.getElementById("btn-guardar-clase").textContent = "Guardar cambios";
+  document.getElementById("btn-cancelar-edicion").style.display = "inline-block";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+window.eliminarClase = async function(claseId){
+  if(!confirm("¿Eliminar esta clase? No se puede deshacer.")) return;
+  const temaId = selectTema.value;
+  await deleteDoc(doc(db, "temas", temaId, "clases", claseId));
+  cargarListaEditor();
+};
+</script>
+
+</body>
+</html>
