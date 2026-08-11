@@ -9,7 +9,9 @@ export function escaparHtml(str){
 }
 
 export function procesarLinea(linea){
-  return escaparHtml(linea).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  return escaparHtml(linea)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>");
 }
 
 // Si una línea es un link de YouTube, Google Drive, o un archivo de imagen/audio,
