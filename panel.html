@@ -39,14 +39,18 @@
     <button class="btn-sesion" id="btn-salir">Cerrar sesión</button>
   </div>
 
-  <section class="seccion-panel">
-    <h2>Crear un tema nuevo</h2>
+ <section class="seccion-panel">
+    <h2 id="titulo-form-tema">Crear un tema nuevo</h2>
     <div class="campo">
       <label>Título del tema</label>
       <input type="text" id="nuevo-tema-titulo" placeholder="Ej: Fundamentos de la Fe">
     </div>
-    <button class="btn-accion" id="btn-crear-tema">Crear tema</button>
-    <p class="mensaje-ok" id="tema-ok" style="display:none;">Tema creado.</p>
+    <div class="fila-botones">
+      <button class="btn-secundario" id="btn-cancelar-tema" style="display:none;">Cancelar edición</button>
+      <button class="btn-accion" id="btn-crear-tema">Crear tema</button>
+    </div>
+    <p class="mensaje-ok" id="tema-ok" style="display:none;">Tema guardado.</p>
+    <div id="lista-temas" style="margin-top:18px;"></div>
   </section>
 
   <section class="seccion-panel">
@@ -157,22 +161,76 @@ onAuthStateChanged(auth, async (usuario) => {
 });
 
 /* ---------- TEMAS ---------- */
+let temaEnEdicionId = null;
+const listaTemas = document.getElementById("lista-temas");
+
 async function cargarSelectTemas(){
   const snap = await getDocs(query(collection(db, "temas"), orderBy("orden")));
   selectTema.innerHTML = snap.docs.map(d => `<option value="${d.id}">${d.data().titulo}</option>`).join("");
   if(snap.docs.length > 0) cargarListaEditor();
+  cargarListaTemas(snap);
+}
+
+function cargarListaTemas(snap){
+  if(snap.empty){
+    listaTemas.innerHTML = "";
+    return;
+  }
+  listaTemas.innerHTML = snap.docs.map(d => `
+    <div class="fila-editor">
+      <div class="info"><strong>${d.data().titulo}</strong></div>
+      <div class="acciones">
+        <button onclick="editarTema('${d.id}', '${d.data().titulo.replace(/'/g, "\\'")}')">Editar</button>
+        <button class="btn-peligro" onclick="eliminarTema('${d.id}')">Eliminar</button>
+      </div>
+    </div>
+  `).join("");
 }
 
 document.getElementById("btn-crear-tema").addEventListener("click", async () => {
   const titulo = document.getElementById("nuevo-tema-titulo").value.trim();
   if(!titulo) return;
-  const snapExistentes = await getDocs(collection(db, "temas"));
-  await addDoc(collection(db, "temas"), { titulo, orden: snapExistentes.size, creado: serverTimestamp() });
-  document.getElementById("nuevo-tema-titulo").value = "";
+
+  if(temaEnEdicionId){
+    await updateDoc(doc(db, "temas", temaEnEdicionId), { titulo });
+  }else{
+    const snapExistentes = await getDocs(collection(db, "temas"));
+    await addDoc(collection(db, "temas"), { titulo, orden: snapExistentes.size, creado: serverTimestamp() });
+  }
+
+  limpiarFormularioTema();
   document.getElementById("tema-ok").style.display = "block";
   setTimeout(() => document.getElementById("tema-ok").style.display = "none", 2500);
   cargarSelectTemas();
 });
+
+document.getElementById("btn-cancelar-tema").addEventListener("click", limpiarFormularioTema);
+
+function limpiarFormularioTema(){
+  temaEnEdicionId = null;
+  document.getElementById("nuevo-tema-titulo").value = "";
+  document.getElementById("titulo-form-tema").textContent = "Crear un tema nuevo";
+  document.getElementById("btn-crear-tema").textContent = "Crear tema";
+  document.getElementById("btn-cancelar-tema").style.display = "none";
+}
+
+window.editarTema = function(id, titulo){
+  temaEnEdicionId = id;
+  document.getElementById("nuevo-tema-titulo").value = titulo;
+  document.getElementById("titulo-form-tema").textContent = "Editando tema";
+  document.getElementById("btn-crear-tema").textContent = "Guardar cambios";
+  document.getElementById("btn-cancelar-tema").style.display = "inline-block";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+window.eliminarTema = async function(id){
+  if(!confirm("¿Eliminar este tema? También se borrarán todas sus clases. No se puede deshacer.")) return;
+  const snapClases = await getDocs(collection(db, "temas", id, "clases"));
+  await Promise.all(snapClases.docs.map(c => deleteDoc(doc(db, "temas", id, "clases", c.id))));
+  await deleteDoc(doc(db, "temas", id));
+  if(temaEnEdicionId === id) limpiarFormularioTema();
+  cargarSelectTemas();
+};
 
 selectTema.addEventListener("change", cargarListaEditor);
 
